@@ -24,5 +24,8 @@ ENV QUEUE_NAME_PREFIX=bull
 ENV QUEUE_NAME=jobs
 ENV POLL_INTERVAL_SECONDS=5
 
+HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \
+    CMD python -c "import pathlib,sys; args=pathlib.Path('/proc/1/cmdline').read_bytes().split(b'\x00'); sys.exit(0 if any(b'monitor_redis_queue.py' in arg for arg in args) else 1)"
+
 # Run monitor_redis_queue.py when the container launches
 CMD ["python", "-u", "monitor_redis_queue.py"]

@@ -2,7 +2,7 @@
 # This works around the issue where n8nio/runners v2.1.0+ removed apk
 
 # Stage 1: Build dependencies in Alpine (must match n8nio/runners base version)
-FROM alpine:3.23 AS builder
+FROM alpine:3.23@sha256:5b10f432ef3da1b8d4c7eb6c487f2f5a8f096bc91145e68878dd4a5019afde11 AS builder
 
 RUN apk add --no-cache \
     chromium \
@@ -18,7 +18,8 @@ RUN apk add --no-cache \
     imagemagick
 
 # Stage 2: Copy to runners image
-FROM n8nio/runners:latest
+# Pin digest for deterministic builds.
+FROM n8nio/runners:latest@sha256:4a05ed669077da9f3c4c2ece53f5830f8eaf6d517a368aeb4da84b0d0a66eff3
 
 USER root
 

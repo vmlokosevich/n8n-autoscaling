@@ -1,13 +1,11 @@
 # Use an official Python runtime as a parent image
-FROM python:3.12-slim as builder
+FROM python:3.12-slim AS builder
 
 # Install system dependencies
 RUN apt-get update && \
     apt-get install -y --no-install-recommends \
     curl \
     jq \
-    docker.io \
-    docker-cli \
     && \
     apt-get clean && \
     rm -rf /var/lib/apt/lists/*
@@ -15,7 +13,8 @@ RUN apt-get update && \
 # Set the working directory in the container
 WORKDIR /app
 
-# Install Docker Compose v2 (multi-architecture support)
+# Install pinned Docker Compose v2 (multi-architecture support)
+ARG DOCKER_COMPOSE_VERSION=v2.40.3
 RUN mkdir -p ~/.docker/cli-plugins/ && \
     ARCH=$(dpkg --print-architecture) && \
     case ${ARCH} in \
@@ -24,7 +23,13 @@ RUN mkdir -p ~/.docker/cli-plugins/ && \
         armhf) COMPOSE_ARCH='armv7' ;; \
         *) echo "Unsupported architecture: ${ARCH}" && exit 1 ;; \
     esac && \
-    curl -SL "https://github.com/docker/compose/releases/latest/download/docker-compose-linux-${COMPOSE_ARCH}" -o ~/.docker/cli-plugins/docker-compose && \
+    COMPOSE_FILE="docker-compose-linux-${COMPOSE_ARCH}" && \
+    COMPOSE_BASE_URL="https://github.com/docker/compose/releases/download/${DOCKER_COMPOSE_VERSION}" && \
+    curl -fsSL "${COMPOSE_BASE_URL}/${COMPOSE_FILE}" -o "/tmp/${COMPOSE_FILE}" && \
+    curl -fsSL "${COMPOSE_BASE_URL}/checksums.txt" -o /tmp/checksums.txt && \
+    cd /tmp && \
+    grep "\\*${COMPOSE_FILE}$" checksums.txt | sha256sum -c - && \
+    mv "/tmp/${COMPOSE_FILE}" ~/.docker/cli-plugins/docker-compose && \
     chmod +x ~/.docker/cli-plugins/docker-compose
 
 # Copy requirements first to leverage Docker cache
@@ -61,6 +66,9 @@ ENV PATH="/usr/local/lib/docker/cli-plugins:${PATH}"
 COPY autoscaler/autoscaler.py .
 COPY docker-compose.yml .
 COPY Dockerfile .
+
+HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \
+    CMD python -c "import pathlib,sys; args=pathlib.Path('/proc/1/cmdline').read_bytes().split(b'\x00'); sys.exit(0 if any(b'autoscaler.py' in arg for arg in args) else 1)"
 
 # Specify the command to run on container start
 CMD ["python", "-u", "autoscaler.py"]

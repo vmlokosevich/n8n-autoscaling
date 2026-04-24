@@ -2,7 +2,8 @@
 # This works around apk being stripped from the official image
 
 # Stage 1: Build dependencies in Alpine
-FROM alpine:3.23 AS builder
+# Keep this pinned to a known-compatible Alpine base.
+FROM alpine:3.23@sha256:5b10f432ef3da1b8d4c7eb6c487f2f5a8f096bc91145e68878dd4a5019afde11 AS builder
 
 RUN apk add --no-cache \
     ffmpeg \
@@ -13,7 +14,8 @@ RUN apk add --no-cache \
     curl
 
 # Stage 2: Copy to n8n image
-FROM n8nio/n8n:latest
+# Pin digest for deterministic builds.
+FROM n8nio/n8n:latest@sha256:a293b89bac876872a0c1ef0fbbb7ce056aa2d215f62917acf032ecb8010199af
 
 USER root
 
