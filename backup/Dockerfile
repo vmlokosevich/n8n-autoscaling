@@ -26,6 +26,6 @@ RUN mkdir -p /backups /config/rclone && \
 COPY backup/backup.py .
 
 HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \
-    CMD python -c "import pathlib,sys; args=pathlib.Path('/proc/1/cmdline').read_bytes().split(b'\x00'); sys.exit(0 if any(b'backup.py' in arg for arg in args) else 1)"
+    CMD sh -c "python -c \"import pathlib,sys; args=pathlib.Path('/proc/1/cmdline').read_bytes().split(b'\\x00'); sys.exit(0 if any(b'backup.py' in arg for arg in args) else 1)\" && pg_isready -h \"${POSTGRES_HOST}\" -p \"${POSTGRES_PORT:-5432}\" -U \"${POSTGRES_USER}\" -d \"${POSTGRES_DB}\" >/dev/null 2>&1"
 
 CMD ["python", "-u", "backup.py"]

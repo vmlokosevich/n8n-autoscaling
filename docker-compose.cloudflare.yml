@@ -1,7 +1,7 @@
 # Cloudflare Tunnel override - Use when exposing n8n via Cloudflare Tunnel only
 # This binds all n8n ports to localhost since cloudflared handles external access.
 #
-# Usage: docker compose -f docker-compose.yml -f docker-compose.cloudflare.yml up -d
+# Usage: docker compose --profile cloudflare -f docker-compose.yml -f docker-compose.cloudflare.yml up -d
 
 services:
   n8n:

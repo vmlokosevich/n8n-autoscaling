@@ -28,12 +28,14 @@ x-n8n: &service-n8n
     - n8n-network
     - shark
   environment:
+    - GENERIC_TIMEZONE=${GENERIC_TIMEZONE}
     - N8N_DIAGNOSTICS_ENABLED=${N8N_DIAGNOSTICS_ENABLED}
     - N8N_MIGRATE_FS_STORAGE_PATH=true
     - N8N_USER_FOLDER=${N8N_USER_FOLDER}
     - N8N_SECURE_COOKIE=${N8N_SECURE_COOKIE}
     - N8N_ENFORCE_SETTINGS_FILE_PERMISSIONS=${N8N_ENFORCE_SETTINGS_FILE_PERMISSIONS}
     - N8N_ENCRYPTION_KEY=${N8N_ENCRYPTION_KEY} # You need to create your own encryption key
+    - N8N_USER_MANAGEMENT_JWT_SECRET=${N8N_USER_MANAGEMENT_JWT_SECRET}
     - N8N_HOST=${N8N_HOST}
     - N8N_PROTOCOL=${N8N_PROTOCOL}
     - N8N_WEBHOOK=${N8N_WEBHOOK}
@@ -41,6 +43,7 @@ x-n8n: &service-n8n
     - WEBHOOK_URL=${WEBHOOK_URL}
     - N8N_EDITOR_BASE_URL=${N8N_EDITOR_BASE_URL}
     - N8N_DATA_TABLES_MAX_SIZE_BYTES=${N8N_DATA_TABLES_MAX_SIZE_BYTES}
+    - N8N_BLOCK_ENV_ACCESS_IN_NODE=${N8N_BLOCK_ENV_ACCESS_IN_NODE}
     # Queue mode config
     - EXECUTIONS_MODE=${EXECUTIONS_MODE}
     - QUEUE_BULL_REDIS_HOST=${QUEUE_BULL_REDIS_HOST}
@@ -96,12 +99,13 @@ x-task-runner: &service-task-runner
 
 services:
   cloudflared:
-    image: cloudflare/cloudflared:latest
+    image: cloudflare/cloudflared:latest@sha256:6b599ca3e974349ead3286d178da61d291961182ec3fe9c505e1dd02c8ac31b0
+    profiles: [cloudflare]
     restart: unless-stopped
     logging: *default-logging
     networks:
       - n8n-network
-    command: tunnel --no-autoupdate run --token ${CLOUDFLARE_TUNNEL_TOKEN}
+    command: tunnel --no-autoupdate run
     environment:
       - TUNNEL_TOKEN=${CLOUDFLARE_TUNNEL_TOKEN}
 
@@ -236,7 +240,7 @@ services:
       - N8N_RUNNERS_INSECURE_MODE=true
     depends_on:
       n8n-worker:
-        condition: service_started
+        condition: service_healthy
     healthcheck:
       test: ["CMD-SHELL", "pgrep -f 'node.*runner' || exit 1"]
       interval: 5s
@@ -256,7 +260,7 @@ services:
       - n8n_webhook:/data/n8n_webhook:ro
       - redis_data:/data/redis:ro
       - backup_data:/backups
-#      - ./backup/rclone.conf:/config/rclone/rclone.conf:ro  # Uncomment after creating rclone.conf from rclone.conf.example
+      - ./backup/rclone.conf:/config/rclone/rclone.conf:ro  # Uncomment after creating rclone.conf from rclone.conf.example
     environment:
       - POSTGRES_HOST=${POSTGRES_HOST}
       - POSTGRES_DB=${POSTGRES_DB}
@@ -311,13 +315,6 @@ services:
     build:
       context: .
       dockerfile: autoscaler/Dockerfile
-      args:
-        - REDIS_HOST=${REDIS_HOST}
-        - REDIS_PORT=${REDIS_PORT}
-        - QUEUE_NAME_PREFIX=${QUEUE_NAME_PREFIX}
-        - QUEUE_NAME=${QUEUE_NAME}
-        - N8N_WORKER_SERVICE_NAME=${N8N_WORKER_SERVICE_NAME}
-        - COMPOSE_PROJECT_NAME=${COMPOSE_PROJECT_NAME}
     restart: unless-stopped
     logging: *default-logging
     environment:

@@ -43,45 +43,41 @@ def get_redis_connection():
 
 def get_queue_length(r_conn):
     """Gets the length of the specified BullMQ waiting queue."""
-    key_to_check = f"{QUEUE_NAME_PREFIX}:{QUEUE_NAME}:wait"
-    length = None
+    queue_keys = [
+        f"{QUEUE_NAME_PREFIX}:{QUEUE_NAME}:wait",
+        f"{QUEUE_NAME_PREFIX}:{QUEUE_NAME}:waiting",
+        f"{QUEUE_NAME_PREFIX}:{QUEUE_NAME}",
+    ]
     try:
-        length = r_conn.llen(key_to_check)
-        if length is not None:
-            return length
-        
-        # Try BullMQ v4+ pattern
-        key_to_check_v4 = f"{QUEUE_NAME_PREFIX}:{QUEUE_NAME}:waiting"
-        length = r_conn.llen(key_to_check_v4)
-        if length is not None:
-            logging.debug(f"Using BullMQ v4+ key pattern '{key_to_check_v4}' for queue length.")
-            return length
+        for key_to_check in queue_keys:
+            key_type = r_conn.type(key_to_check)
+            if key_type == "list":
+                length = r_conn.llen(key_to_check)
+                logging.debug(f"Using queue key '{key_to_check}' for queue length: {length}")
+                return length
+            if key_type not in ("none", "list"):
+                logging.debug(
+                    f"Queue key '{key_to_check}' exists but has type '{key_type}', expected list. Skipping."
+                )
 
-        # Try legacy pattern (sometimes just the queue name for older Bull versions or simple lists)
-        key_to_check_legacy = f"{QUEUE_NAME_PREFIX}:{QUEUE_NAME}"
-        length = r_conn.llen(key_to_check_legacy)
-        if length is not None:
-            logging.debug(f"Using legacy key pattern '{key_to_check_legacy}' for queue length.")
-            return length
-        
-        logging.warning(f"Queue key patterns ('{key_to_check}', '{key_to_check_v4}', '{key_to_check_legacy}') not found or not a list. Assuming length 0.")
+        logging.debug(
+            "No known queue keys exist as lists for patterns %s. Assuming queue length 0.",
+            queue_keys,
+        )
         return 0
-    except redis.exceptions.ResponseError as e:
-        logging.error(f"Redis error when checking length of queue keys: {e}. Assuming length 0.")
-        return 0
+    except redis.exceptions.RedisError as e:
+        logging.error(f"Redis error when checking length of queue keys: {e}. Queue length unknown.")
+        return None
     except Exception as e:
-        logging.error(f"Unexpected error checking queue length: {e}. Assuming length 0.")
-        return 0
+        logging.error(f"Unexpected error checking queue length: {e}. Queue length unknown.")
+        return None
 
 
 def get_current_replicas(docker_client, service_name, project_name):
     """Gets the current number of running containers for a Docker Compose service."""
     if not project_name:
         logging.warning("COMPOSE_PROJECT_NAME is not set. Cannot accurately determine current replicas.")
-        # As a fallback, we might try to count containers based on service name label alone,
-        # but this is unreliable if multiple projects use the same service name.
-        # For now, return a high number to prevent unintended scaling if project name is missing.
-        return MAX_REPLICAS + 1 # Prevents scaling if project name is missing
+        return None
 
     try:
         filters = {
@@ -102,7 +98,7 @@ def get_current_replicas(docker_client, service_name, project_name):
         return running_count
     except Exception as e:
         logging.error(f"Error getting current replicas for {service_name} in {project_name}: {e}")
-        return MAX_REPLICAS + 1 # Return a safe value to prevent scaling on error
+        return None
 
 
 def scale_service(service_name, replicas, compose_file, project_name):
@@ -141,7 +137,7 @@ def scale_service(service_name, replicas, compose_file, project_name):
         logging.error(f"  Stderr: {e.stderr}")
         return False
     except FileNotFoundError:
-        logging.error("docker-compose command not found. Ensure it's installed in the autoscaler container and in PATH.")
+        logging.error("docker command not found. Ensure Docker CLI with Compose v2 is installed and in PATH.")
         return False
 
 
@@ -186,7 +182,7 @@ def scale_worker_with_runner(replicas, compose_file, project_name):
         logging.error(f"  Stderr: {e.stderr}")
         return False
     except FileNotFoundError:
-        logging.error("docker-compose command not found. Ensure it's installed in the autoscaler container and in PATH.")
+        logging.error("docker command not found. Ensure Docker CLI with Compose v2 is installed and in PATH.")
         return False
 
 
@@ -229,6 +225,16 @@ def main():
 
             queue_len = get_queue_length(r_conn)
             current_reps = get_current_replicas(docker_cl, N8N_WORKER_SERVICE_NAME, COMPOSE_PROJECT_NAME)
+
+            if queue_len is None or current_reps is None:
+                logging.warning(
+                    "Skipping scaling decision due to dependency read failure "
+                    "(queue_len=%s, current_replicas=%s).",
+                    queue_len,
+                    current_reps,
+                )
+                time.sleep(POLLING_INTERVAL_SECONDS)
+                continue
 
             # Event-driven logging: only log queue length when there's work
             if queue_len > 0:

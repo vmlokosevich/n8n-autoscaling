@@ -60,7 +60,7 @@ graph TD
 - Redis queue monitoring with password authentication
 - Docker Compose based deployment with modular override files
 - Health checks and centralized log rotation for all services
-- **Security hardened** - Redis auth, localhost port binding, PostgreSQL user separation, non-root containers
+- **Security hardened** - Redis auth, localhost port binding, PostgreSQL user separation
 - Puppeteer and Playwright with Chromium for web scraping in Code nodes
 - Stealth plugins for bot detection evasion
 - External npm packages (ajv, puppeteer-core, playwright-core, etc.)
@@ -120,7 +120,12 @@ The setup wizard will guide you through:
    docker network create shark
    ```
 
-5. Start everything:
+5. Enable Cloudflare tunnel profile (optional, only if you use cloudflared):
+   ```bash
+   export COMPOSE_PROFILES=cloudflare
+   ```
+
+6. Start everything:
    ```bash
    docker compose up -d --build
    ```
@@ -200,7 +205,7 @@ Modular override files allow you to customize the deployment without editing the
 
 Example with Cloudflare override:
 ```bash
-docker compose -f docker-compose.yml -f docker-compose.cloudflare.yml up -d
+docker compose --profile cloudflare -f docker-compose.yml -f docker-compose.cloudflare.yml up -d
 ```
 
 To enable the Cloudflare override with the setup wizard or systemd generator, set `ENABLE_CLOUDFLARE_OVERRIDE=true` in your `.env`.

@@ -68,7 +68,7 @@ COPY docker-compose.yml .
 COPY Dockerfile .
 
 HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \
-    CMD python -c "import pathlib,sys; args=pathlib.Path('/proc/1/cmdline').read_bytes().split(b'\x00'); sys.exit(0 if any(b'autoscaler.py' in arg for arg in args) else 1)"
+    CMD sh -c "python -c \"import pathlib,sys; args=pathlib.Path('/proc/1/cmdline').read_bytes().split(b'\\x00'); sys.exit(0 if any(b'autoscaler.py' in arg for arg in args) else 1)\" && docker info >/dev/null 2>&1"
 
 # Specify the command to run on container start
 CMD ["python", "-u", "autoscaler.py"]
