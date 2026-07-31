@@ -23,6 +23,10 @@ Data/
 Logs/
 backups/
 
+# VPS migration working dirs / bundles (contain secrets)
+migration-export/
+migration-import*/
+
 # IDE files
 .vscode/
 .idea/

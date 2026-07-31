@@ -523,6 +523,76 @@ docker compose --profile backup up n8n-backup
 
 **Important:** Your `N8N_ENCRYPTION_KEY` and `N8N_USER_MANAGEMENT_JWT_SECRET` must match the values used when the backup was created, otherwise n8n credentials cannot be decrypted. Keep these values safe separately from your backups.
 
+## Migrating to a New VPS
+
+Use [`migrate-to-new-vps.sh`](migrate-to-new-vps.sh) for a full move of the running stack: project directory (including `.env`, `backup/rclone.conf`, and any local uncommitted compose edits) plus all five Docker named volumes (`postgres_data`, `redis_data`, `n8n_main`, `n8n_webhook`, `backup_data`).
+
+This is complementary to the scheduled backup service above. Cloud backups via rclone remain a safety net; the migration script performs a consistent, byte-for-byte volume transfer during a short downtime window.
+
+### Prerequisites
+
+- Source and target VPS should use the **same CPU architecture** (e.g. both `x86_64`) for safe raw restore of `postgres_data`. If architectures differ, restore from a `pg_dump` backup instead (see [Restoring from a Backup](#restoring-from-a-backup)).
+- Short downtime is expected while the source stack is stopped for export.
+- Target host: Ubuntu 24.x recommended (script `bootstrap` installs Docker Engine + Compose).
+
+### 1. Export on the source VPS
+
+```bash
+cd /root/n8n-autoscaling   # or your project path
+./migrate-to-new-vps.sh export
+# Optional: leave stack down after export
+# ./migrate-to-new-vps.sh export --keep-down
+# Optional: upload the bundle automatically
+# TARGET_HOST=root@NEW_VPS_IP ./migrate-to-new-vps.sh export
+```
+
+The script drains the Redis queue, stops all services (volumes kept), archives the project tree and each volume, writes a checksum `manifest.txt`, and builds `migration-export/n8n-migration-TIMESTAMP.tar.gz`. By default it restarts the source stack afterward.
+
+Copy the bundle if you did not set `TARGET_HOST`:
+
+```bash
+scp migration-export/n8n-migration-*.tar.gz root@NEW_VPS_IP:~/
+```
+
+Also copy the migration script (or this repo) to the new VPS if it is not already there — `bootstrap` / `import` need the script before the project directory is restored.
+
+### 2. Bootstrap the new VPS
+
+On a clean Ubuntu 24 host (as root):
+
+```bash
+# If you only copied the script:
+chmod +x migrate-to-new-vps.sh
+./migrate-to-new-vps.sh bootstrap
+```
+
+This runs `apt update/upgrade`, installs Docker Engine + the Compose plugin, and creates the external `shark` network.
+
+### 3. Import on the new VPS
+
+```bash
+./migrate-to-new-vps.sh import ~/n8n-migration-TIMESTAMP.tar.gz
+# Overwrite an existing project dir / volumes if re-running:
+# ./migrate-to-new-vps.sh import ~/n8n-migration-TIMESTAMP.tar.gz --force
+```
+
+Import verifies checksums, restores the project to `/root/n8n-autoscaling`, sets `COMPOSE_PROFILES=backup,cloudflare` (and `ENABLE_CLOUDFLARE_OVERRIDE=true`) so Cloudflare tunnel + backups start without ad-hoc flags, recreates volumes from the archives, then runs `docker compose up -d --build` with health checks.
+
+### 4. Cutover checklist
+
+1. Open the editor URL from `.env` (`N8N_EDITOR_BASE_URL`) and confirm workflows, credentials, and execution history.
+2. Trigger a webhook on `N8N_WEBHOOK_URL` and confirm cron/schedule triggers still fire.
+3. Check tunnel logs: `docker compose logs cloudflared` — the Cloudflare tunnel reconnects from the new IP; DNS usually does not need changing when using a tunnel token.
+4. Confirm backups still upload to `BACKUP_RCLONE_DESTINATIONS` (optional: use a new remote path so old/new host backups do not mix).
+5. Optionally enable systemd autostart: `./generate-systemd.sh`.
+6. Securely delete the migration bundle (it contains secrets).
+7. After validation, stop or decommission the old VPS (or keep it as a short-lived fallback).
+
+### Security notes
+
+- The bundle includes `.env` and `backup/rclone.conf`. Transfer only over SSH and delete it after a successful cutover.
+- Do **not** regenerate `N8N_ENCRYPTION_KEY` / `N8N_USER_MANAGEMENT_JWT_SECRET` on the new host — they must match the source values (they travel with `.env` inside the project archive).
+
 ## Updating
 
 To update:
@@ -579,6 +649,7 @@ https://webhook.yourdomain.com/webhook/your-webhook-id
 ├── init-postgres.sh                # PostgreSQL app user initialization
 ├── n8n-setup.sh                    # Interactive setup wizard
 ├── generate-systemd.sh             # Systemd service generator
+├── migrate-to-new-vps.sh           # Full VPS migration (export / bootstrap / import)
 ├── .env.example                    # Example environment configuration
 ├── .env                            # Your configuration (git-ignored)
 ├── .dockerignore                   # Docker build context exclusions
