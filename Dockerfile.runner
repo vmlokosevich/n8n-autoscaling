@@ -45,6 +45,11 @@ RUN ln -sf /usr/lib/chromium/chromium /usr/bin/chromium
 
 # Install npm packages in the task runner's node_modules directory
 WORKDIR /opt/runners/task-runner-javascript
+# Pin pnpm to v10 before installing. The base image's node_modules is linked
+# against a pnpm v10 store, but corepack now defaults to pnpm v11 (store v11),
+# so `corepack pnpm add` fails with ERR_PNPM_UNEXPECTED_STORE. Activating pnpm@10
+# keeps the store version matched. See issue #26.
+RUN /usr/local/bin/node /usr/local/lib/node_modules/corepack/dist/corepack.js prepare pnpm@10 --activate
 RUN /usr/local/bin/node /usr/local/lib/node_modules/corepack/dist/corepack.js pnpm add \
     ajv \
     ajv-formats \
