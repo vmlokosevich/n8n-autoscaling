@@ -103,6 +103,55 @@ volume_full_name() {
     echo "$(compose_project_name)_${suffix}"
 }
 
+volume_mountpoint() {
+    docker volume inspect -f '{{ .Mountpoint }}' "$1" 2>/dev/null
+}
+
+# Prefer host-path tar for local volumes (no image pull / no network).
+# Fall back to alpine container only if the mountpoint is not readable on the host
+# (e.g. Docker Desktop VM paths, non-local volume drivers).
+archive_volume() {
+    local vol_name="$1" archive_path="$2"
+    local mountpoint
+    mountpoint=$(volume_mountpoint "$vol_name")
+
+    if [ -n "$mountpoint" ] && [ -d "$mountpoint" ] && [ -r "$mountpoint" ]; then
+        tar czf "$archive_path" -C "$mountpoint" .
+        return 0
+    fi
+
+    warn "  Host mountpoint unavailable for $vol_name (got: ${mountpoint:-empty}) — falling back to alpine container"
+    if ! docker run --rm \
+        -v "${vol_name}:/volume:ro" \
+        -v "$(dirname "$archive_path"):/backup" \
+        alpine:3.21 \
+        tar czf "/backup/$(basename "$archive_path")" -C /volume .
+    then
+        die "Failed to archive $vol_name. Host path not readable and alpine:3.21 pull/run failed (check Docker Hub / DNS). As root on Linux, ensure volume mountpoint is accessible."
+    fi
+}
+
+restore_volume() {
+    local vol_name="$1" archive_path="$2"
+    local mountpoint
+    mountpoint=$(volume_mountpoint "$vol_name")
+
+    if [ -n "$mountpoint" ] && [ -d "$mountpoint" ] && [ -w "$mountpoint" ]; then
+        tar xzf "$archive_path" -C "$mountpoint"
+        return 0
+    fi
+
+    warn "  Host mountpoint unavailable for $vol_name (got: ${mountpoint:-empty}) — falling back to alpine container"
+    if ! docker run --rm \
+        -v "${vol_name}:/volume" \
+        -v "$(dirname "$archive_path"):/backup:ro" \
+        alpine:3.21 \
+        sh -c "cd /volume && tar xzf /backup/$(basename "$archive_path")"
+    then
+        die "Failed to restore $vol_name. Host path not writable and alpine:3.21 pull/run failed (check Docker Hub / DNS). As root on Linux, ensure volume mountpoint is accessible."
+    fi
+}
+
 ensure_in_project_dir() {
     cd "$SCRIPT_DIR"
     [ -f docker-compose.yml ] || die "docker-compose.yml not found in $SCRIPT_DIR"
@@ -209,11 +258,7 @@ cmd_export() {
             continue
         fi
         info "  Archiving $vol_name..."
-        docker run --rm \
-            -v "${vol_name}:/volume:ro" \
-            -v "$work_dir/volumes:/backup" \
-            alpine:3.21 \
-            tar czf "/backup/${suffix}.tar.gz" -C /volume .
+        archive_volume "$vol_name" "$archive_path"
         ok "  $suffix: $(du -h "$archive_path" | awk '{print $1}')"
     done
 
@@ -482,11 +527,7 @@ cmd_import() {
         fi
         docker volume create "$vol_name" >/dev/null
         info "  Restoring $vol_name..."
-        docker run --rm \
-            -v "${vol_name}:/volume" \
-            -v "$(dirname "$archive_path"):/backup:ro" \
-            alpine:3.21 \
-            sh -c "cd /volume && tar xzf /backup/$(basename "$archive_path")"
+        restore_volume "$vol_name" "$archive_path"
         ok "  Restored $vol_name"
     done
 
